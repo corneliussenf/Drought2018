@@ -13,8 +13,6 @@ library(fasterize)
 # The following code needs disturbance maps downloaded from 10.5281/zenodo.3924381
 path_dist_maps <- "../../Disturbance Europe/Mapping/results/version1.1/"
 
-studyregion <- read_sf("data/gis/studyregion_epsg3035.gpkg")
-
 countries <- list.files(path_dist_maps)
 
 grid <- read_sf("data/climate/climategrid_epsg3035.gpkg")
