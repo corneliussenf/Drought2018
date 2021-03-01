@@ -1,0 +1,36 @@
+country_name,iso_code,country_area_km2,country_name_short,project_id,euro_region,foresteurope_regions
+Albania,AL,28786.07,albania,1,south-east,south-east
+Austria,AT,83988.21,austria,2,central,central-west
+Belarus,BY,207575.27,belarus,3,east,central-east
+Belgium,BE,30587.77,belgium,4,west,central-west
+Bosnia and Herzegovina,BA,51030.41,bosniaherzegovina,5,south-east,south-east
+Bulgaria,BG,110953.91,bulgaria,6,south-east,south-east
+Croatia,HR,57017.2,croatia,7,south-east,south-east
+Czech Republic,CZ,78842.74,czechia,8,central,central-east
+Denmark,DK,43501.59,denmark,9,north,north
+Estonia,EE,45405.32,estonia,10,north,north
+Finland,FI,338434,finland,11,north,north
+France,FR,549006.24,france,12,west,central-west
+Germany,DE,357454.99,germany,13,central,central-west
+Greece,GR,124885.96,greece,14,south-east,south-east
+Hungary,HU,93001.36,hungary,15,central,central-east
+Ireland,IE,70243.37,ireland,16,west,central-west
+Italy,IT,300887.48,italy,17,south-west,south-west
+Latvia,LV,64549.9,latvia,18,north,north
+Lithuania,LT,64941.46,lithuania,19,north,north
+Moldova,MD,33847.27,moldova,20,east,central-east
+Montenegro,ME,13764.39,montenegro,21,south-east,south-east
+Netherlands,NL,35162.75,netherlands,22,west,central-west
+Norway,NO,311654.47,norway,23,north,north
+Poland,PL,311759.97,poland,24,central,central-east
+Portugal,PT,88700.69,portugal,25,south-west,south-west
+Romania,RO,238289.83,romania,26,south-east,central-east
+Serbia,RS,88372.28,serbia,28,south-east,south-east
+Slovakia,SK,49036.66,slovakia,29,central,central-east
+Slovenia,SI,20221.19,slovenia,30,central,south-east
+Spain,ES,498518.52,spain,31,south-west,south-west
+Sweden,SE,450040.79,sweden,32,north,north
+Switzerland,CH,41239.21,switzerland,33,central,central-west
+The Former Yugoslav Republic of Macedonia,MK,25438.31,macedonia,34,south-east,south-east
+Ukraine,UA,597120.26,ukraine,35,east,central-east
+United Kingdom,GB,245164.44,unitedkingdom,36,west,central-west
