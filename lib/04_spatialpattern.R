@@ -382,6 +382,7 @@ dat <- ngb_summary %>%
   left_join(freq_summary)
 
 save(dat, file = "temp/dat.RData")
+load(file = "temp/dat.RData")
 
 library(plot3D)
 

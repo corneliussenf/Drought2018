@@ -1,0 +1,310 @@
+
+# Packages ----------------------------------------------------------------
+
+library(tidyverse)
+library(sf)
+library(patchwork)
+
+# Load data ---------------------------------------------------------------
+
+grid <- read_sf("data/climate/climategrid_epsg3035.gpkg")
+
+cntrs <- read_sf("data/admin/countries_europe.shp")
+
+#grid_eur <- st_join(grid, cntrs, join = st_intersects)
+#write_sf(grid_eur, "temp/grid_eur.gpkg")
+grid_eur <- read_sf("temp/grid_eur.gpkg")
+
+cntr_groups <- read_csv("data/admin/country_grouping.csv")
+
+dist_agg <- list.files("data/disturbances/aggregated_to_grid", 
+                       glob2rx("*disturbance*.csv$"), full.names = TRUE) %>%
+  map(read_csv) %>%
+  bind_rows()
+
+# Drop the year 2020 fpr Norway, as there are many false positives due to data inconsistencies
+dist_agg <- dist_agg %>%
+  filter(!(country == "norway" & year == 2020))
+
+forest_agg <- list.files("data/disturbances/aggregated_to_grid", 
+                         pattern = glob2rx("*forest*.csv$"), full.names = TRUE) %>%
+  map(read_csv) %>%
+  bind_rows()
+
+climate_2018 <- read_csv("data/climate/era5_sm_vpd_summer_anomaly.csv")
+
+# Derive totals -----------------------------------------------------------
+
+dist_agg_total <- dist_agg %>%
+  group_by(year) %>%
+  summarize(disturbance_ha = sum(disturbance_ha, na.rm = TRUE))
+
+write_csv(dist_agg_total, "results/disturbance_area_map_based_total_europe.csv")
+
+# By drought area
+
+ggplot() +
+  geom_line(data = dist_agg_total, aes(x = year, y = disturbance_ha))
+
+dist_agg_total_country <- dist_agg %>%
+  group_by(year, country) %>%
+  summarize(disturbance_ha = sum(disturbance_ha, na.rm = TRUE))
+
+write_csv(dist_agg_total_country, "results/disturbance_area_map_based_total_countries.csv")
+
+# Return intervals --------------------------------------------------------
+
+mn <- mean(dist_agg_total[dist_agg_total$year < 2016, "disturbance_ha"][[1]])
+sd <- sd(dist_agg_total[dist_agg_total$year < 2016, "disturbance_ha"][[1]])
+
+prop <- 1 - pnorm(dist_agg_total$disturbance_ha, mn, sd)
+
+prop_2018_2020 <- prod(prop[dist_agg_total$year >= 2018])
+
+draws_binom <- rbinom(10000, 1, prop_2018_2020)
+
+(length(draws_binom) + 1) / sum(draws_binom)
+
+# Calculate disturbance anomaly ----------------------------------------------
+
+dat <- dist_agg %>%
+  filter(!is.na(gridindex)) %>%
+  group_by(gridindex, year) %>%
+  summarize(disturbance_ha = sum(disturbance_ha, na.rm = TRUE)) %>%
+  ungroup() %>%
+  split(.$gridindex) %>%
+  map(~ right_join(., data.frame(gridindex = unique(.$gridindex),
+                                 year = 1986:2020), 
+                   by = c("gridindex", "year"))) %>%
+  map(~ mutate_at(., .vars = vars(disturbance_ha), .funs = function(x) ifelse(is.na(x), 0, x))) %>%
+  bind_rows()
+
+dat <- dat %>%
+  left_join(grid_eur %>% 
+              st_drop_geometry() %>%
+              group_by(gridindex) %>%
+              summarise(country = COUNTRY[which.max(AREA_km2)],
+                        iso_cc = ISO_CC[which.max(AREA_km2)]), by = c("gridindex"))
+
+# Drop anomaly for Norway in 2020, as there is no data available
+dat <- dat %>%
+  filter(!(country == "Norway" & year == 2020))
+
+forest <- forest_agg %>%
+  group_by(gridindex) %>%
+  summarise(forest_ha = sum(forest_ha),
+            land_ha = sum(land_ha)) %>%
+  mutate(forestcover = forest_ha / land_ha) %>%
+  ungroup()
+
+forest_grid <- grid %>%
+  right_join(forest)
+
+reference_period <- 1986:2015
+
+dat <- dat %>%
+  group_by(gridindex) %>%
+  filter(sum(disturbance_ha) > 35) %>% # Exclude areas with less than 1 ha/yr of disturbances on average
+  filter(sum(disturbance_ha[year %in% reference_period]) > 30) %>% # Exclude areas with less than 1 ha/yr of disturbances on average
+  mutate(anomaly = disturbance_ha / mean(disturbance_ha[year %in% reference_period], na.rm = TRUE) - 1) %>% 
+  ungroup()
+
+dat <- dat %>%
+  full_join(forest)
+
+dat <- dat %>%
+  mutate(forestcover = forest_ha / land_ha)
+
+dat <- dat %>% filter(!is.na(forest_ha))
+
+save(dat, file = "temp/dat.RData")
+
+dat_grid <- grid %>%
+  right_join(dat, by = "gridindex")
+
+world <- rnaturalearth::ne_countries(scale = "medium", returnclass = "sf")
+world <- st_transform(world, st_crs(grid))
+world <- st_crop(world, st_bbox(cntrs) + c(-0.05, -0.05, 0.01, 0.01) * as.double(st_bbox(cntrs)))
+
+dat_grid_2018_2020 <- dat_grid %>%
+  filter(year %in% 2018:2020) %>%
+  mutate(disturbance_rate = disturbance_ha / forest_ha,
+         disturbance_rate_capped = ifelse(disturbance_rate > 0.05, 0.05, disturbance_rate)) %>%
+  # group_by(gridindex) %>%
+  # summarise(anomaly = sum(anomaly),
+  #           forestcover = unique(forestcover),
+  #           forest_ha = unique(forest_ha)) %>%
+  mutate(anomaly_capped = ifelse(anomaly > 5, 5, anomaly))
+
+p_anomaly_map <- ggplot() +
+  geom_sf(data = world, color = "black", fill = "lightgray") +
+  geom_sf(data = dat_grid_2018_2020,
+          aes(fill = anomaly_capped * 100, col = anomaly_capped * 100)) +
+  geom_sf(data = world, color = "black", fill = NA) +
+  scale_fill_gradient2(low = "#2166ac", mid = "#FFFFFF", high = "#b2182b",
+                       breaks = c(-100, 0, 100, 200, 300, 400, 500),
+                       labels = c("-100%", "0%", "100%", "200%", "300%", "400%", ">500%")) +
+  scale_color_gradient2(low = "#2166ac", mid = "#FFFFFF", high = "#b2182b",
+                        breaks = c(-100, 0, 100, 200, 300, 400, 500),
+                        labels = c("-100%", "0%", "100%", "200%", "300%", "400%", ">500%")) +
+  theme_linedraw() +
+  theme(panel.spacing = unit(0, "cm"),
+        #panel.background = element_rect(fill = "#d1e5f0", color = "black", size = 1.125),
+        panel.background = element_rect(fill = "white", color = "black", size = 1.125),
+        legend.key.height = unit(1.125, "cm"),
+        legend.key.width = unit(0.125, "cm"),
+        legend.position = "right",
+        strip.background = element_blank(),
+        strip.text = element_blank(),
+        plot.title = element_text(size = 10),
+        legend.text = element_text(size = 9),
+        axis.text = element_blank(),
+        axis.title = element_blank(),
+        axis.ticks = element_blank(),
+        plot.margin = unit(c(0, 0, 0, 0), "cm")) +
+  coord_sf(expand = FALSE, datum = NA) +
+  labs(col = NULL, fill = NULL, 
+       title = paste0("Forest disturbance anomaly 2018-2020 in reference to ", paste(range(reference_period), collapse = "-"))) +
+  facet_wrap(~year, ncol = 3)
+
+ggsave("results/disturbance_anomaly_cummulative_map_2018-2020.pdf", p_anomaly_map, width = 7.5, height = 3)
+
+sum_temp_regions <- dat %>%
+  filter(!is.na(disturbance_ha)) %>%
+  left_join(cntr_groups, by = c("iso_cc" = "iso_code")) %>%
+  filter(!is.na(euro_region)) %>%
+  group_by(year, euro_region) %>%
+  summarise(disturbance_ha = sum(disturbance_ha)) %>%
+  group_by(euro_region) %>%
+  mutate(anomaly = disturbance_ha / mean(disturbance_ha[year %in% reference_period], na.rm = TRUE) - 1) %>%
+  ungroup() %>%
+  mutate(euro_region = str_to_title(euro_region),
+         euro_region_label = abbreviate(euro_region, 1))
+
+p_anomaly_regions <- ggplot() +
+  geom_boxplot(data = sum_temp_regions,
+              aes(x = reorder(euro_region_label, anomaly, mean),
+                  y = anomaly * 100,
+                  col = euro_region_label),
+              alpha = 0.5, outlier.colour = NA, width = 0.2) +
+  geom_jitter(data = sum_temp_regions,
+              aes(x = reorder(euro_region_label, anomaly, mean), 
+                  y = anomaly * 100, 
+                  #col = euro_region_label,
+                  fill = euro_region_label,
+                  alpha = ifelse(year <= 2017, "a", "b"),
+                  shape = ifelse(year <= 2017, "a", "b")),
+              width = 0.125, stroke = 0, size = 2) +
+  ggrepel::geom_text_repel(data = sum_temp_regions %>% filter(year > 2017),
+                           aes(x = reorder(euro_region_label, anomaly, mean), 
+                               y = anomaly * 100, 
+                               label = year,
+                               col = euro_region_label),
+                           size = 2.5) +
+  theme_classic() +
+  theme(legend.position = "none",
+        panel.background = element_rect(color = "black", size = 1.25),
+        axis.text = element_text(size = 9, color = "grey30"),
+        axis.title = element_text(size = 10)) +
+  labs(x = NULL, y = "Forest disturbance anomaly (%)", col = NULL, fill = NULL) +
+  scale_color_brewer(palette = "Paired") +
+  scale_fill_brewer(palette = "Paired") +
+  coord_flip() +
+  scale_shape_manual(values = c(22, 21)) +
+  scale_alpha_manual(values = c(0.1, 1))
+
+ggsave("results/disturbance_anomaly_1986-2020_regions.pdf", p_anomaly_regions, width = 3.5, height = 3.5)
+
+# Model -------------------------------------------------------------------
+
+modeldat <- dat %>%
+  filter(!is.na(disturbance_ha)) %>% 
+  filter(year %in% 2018:2020) %>%
+  mutate(disturbance_rate = disturbance_ha / forest_ha,
+         disturbance_count = as.integer(disturbance_ha / 0.09),
+         forest_count = as.integer(forest_ha / 0.09)) %>%
+  left_join(climate_2018 %>% filter(year %in% 2018:2020)) %>%
+  left_join(climate_2018 %>% 
+              filter(year %in% 2018) %>% 
+              dplyr::select(gridindex, sm_z_18 = sm_z, vpd_z_18 = vpd_z)) %>%
+  arrange(gridindex) %>%
+  filter(!is.na(vpd_z)) %>% 
+  filter(!is.na(sm_z))
+
+save(modeldat, file = "temp/modeldat.RData")
+load("temp/modeldat.RData")
+
+modeldat_inp <- modeldat %>% 
+  filter(disturbance_ha > 0) %>%
+  mutate(year = factor(year))
+
+fit_all <- lm(log(anomaly + 1) ~ (sm_z_18 * vpd) * year, 
+              data = modeldat_inp)
+
+options(na.action = "na.fail")
+
+modelselect <- MuMIn::dredge(fit_all)
+
+summary(fit_all)
+
+#plot(fit_all)
+
+prediction <- effects::effect("sm_z_18:vpd:year", 
+                              fit_all, 
+                              xlevels = list(sm_z_18 = seq(-4, 4, length.out = 250))) %>%
+  as.data.frame()
+
+p_responsecurve <- ggplot(data = prediction) +
+  geom_point(data = modeldat %>%
+               filter(disturbance_ha > 0) %>%
+               sample_n(., 500),
+             aes(x = sm_z_18, y = (anomaly) * 100),
+             alpha = 0.1) +
+  geom_ribbon(aes(x = sm_z_18, ymin = (exp(lower) - 1) * 100, ymax = (exp(upper) - 1) * 100, fill = factor(vpd)),
+              alpha = 0.3) + 
+  geom_line(aes(x = sm_z_18, y = (exp(fit) - 1) * 100, col = factor(vpd))) +
+  theme_classic() +
+  scale_color_brewer(palette = "RdBu", direction = -1) +
+  scale_fill_brewer(palette = "RdBu", direction = -1) +
+  #facet_wrap(~year) +
+  theme(panel.background = element_rect(color = "black", size = 1.2),
+        axis.text = element_text(size = 8, color = "grey30"),
+        axis.title = element_text(size = 9),
+        legend.position = "right",
+        # legend.position = c(1, 1),
+        legend.justification = c(1, 1),
+        legend.background = element_blank(),
+        legend.title = element_text(size = 8),
+        legend.text = element_text(size = 7),
+        legend.key.height = unit(0.25, "cm"),
+        legend.key.width = unit(0.25, "cm"),
+        strip.background = element_blank(),
+        strip.text = element_text(size = 9)) +
+  labs(x = "Summer soil moisture anomaly 2018 (z-scores)", y = "Disturbance anomaly (%)",
+       col = "Summer\nVPD (kPa)", fill = "Summer\nVPD (kPa)") +
+  ylim(-100, 500) +
+  facet_wrap(~year)
+
+ggsave("results/disturbance_anomaly_response_curve.pdf", p_responsecurve, width = 7.5, height = 2.5)
+
+### For supplement
+
+dat %>%
+  group_by(year, country) %>%
+  summarise(disturbance_ha = sum(disturbance_ha)) %>%
+  group_by(country) %>%
+  mutate(disturbance_ha_reference1986to2915 = round(mean(disturbance_ha[year %in% reference_period]), 0),
+         anomaly_percent = (disturbance_ha / disturbance_ha_reference1986to2915 - 1) * 100) %>%
+  ungroup() %>%
+  mutate(country = ifelse(country == "The Former Yugoslav Republic of Macedonia", "North Macedonia", country)) %>%
+  filter(!is.na(country)) %>%
+  filter(year %in% 2018:2020) %>%
+  mutate(disturbance_ha_anomaly = paste0(disturbance_ha, ":", round(anomaly_percent, 2))) %>%
+  dplyr::select(-disturbance_ha, -anomaly_percent) %>%
+  spread(key = "year", value = "disturbance_ha_anomaly") %>%
+  separate("2018", c("disturbance_ha_2018", "disturbance_anomaly_percent_2018"), "\\:") %>%
+  separate("2019", c("disturbance_ha_2019", "disturbance_anomaly_percent_2019"), "\\:") %>%
+  separate("2020", c("disturbance_ha_2020", "disturbance_anomaly_percent_2020"), "\\:") %>%
+  write_excel_csv("results/disturbance_anomalies_map_estimates.csv")
+
+
