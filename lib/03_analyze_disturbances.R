@@ -238,8 +238,10 @@ modeldat_inp <- modeldat %>%
   filter(disturbance_ha > 0) %>%
   mutate(year = factor(year))
 
-fit_all <- lm(log(anomaly + 1) ~ (sm_z_18 * vpd) * year, 
+fit_all <- lm(log(anomaly + 1) ~ (sm_z_18 * vpd_z) * year, 
               data = modeldat_inp)
+
+summary(fit_all)
 
 options(na.action = "na.fail")
 
@@ -249,9 +251,10 @@ summary(fit_all)
 
 #plot(fit_all)
 
-prediction <- effects::effect("sm_z_18:vpd:year", 
+prediction <- effects::effect("sm_z_18:vpd_z:year", 
                               fit_all, 
-                              xlevels = list(sm_z_18 = seq(-4, 4, length.out = 250))) %>%
+                              xlevels = list(sm_z_18 = seq(-4, 4, length.out = 250),
+                                             vpd_z = c(-3, 0, 3, 5))) %>%
   as.data.frame()
 
 p_responsecurve <- ggplot(data = prediction) +
@@ -260,9 +263,9 @@ p_responsecurve <- ggplot(data = prediction) +
                sample_n(., 500),
              aes(x = sm_z_18, y = (anomaly) * 100),
              alpha = 0.1) +
-  geom_ribbon(aes(x = sm_z_18, ymin = (exp(lower) - 1) * 100, ymax = (exp(upper) - 1) * 100, fill = factor(vpd)),
+  geom_ribbon(aes(x = sm_z_18, ymin = (exp(lower) - 1) * 100, ymax = (exp(upper) - 1) * 100, fill = factor(vpd_z)),
               alpha = 0.3) + 
-  geom_line(aes(x = sm_z_18, y = (exp(fit) - 1) * 100, col = factor(vpd))) +
+  geom_line(aes(x = sm_z_18, y = (exp(fit) - 1) * 100, col = factor(vpd_z))) +
   theme_classic() +
   scale_color_brewer(palette = "RdBu", direction = -1) +
   scale_fill_brewer(palette = "RdBu", direction = -1) +
@@ -280,8 +283,9 @@ p_responsecurve <- ggplot(data = prediction) +
         legend.key.width = unit(0.25, "cm"),
         strip.background = element_blank(),
         strip.text = element_text(size = 9)) +
-  labs(x = "Summer soil moisture anomaly 2018 (z-scores)", y = "Disturbance anomaly (%)",
-       col = "Summer\nVPD (kPa)", fill = "Summer\nVPD (kPa)") +
+  labs(x = "Summer soil moisture anomaly 2018", 
+       y = "Disturbance anomaly (%)",
+       col = "Summer\nVPD\nanomaly (kPa)", fill = "Summer\nVPD (kPa)") +
   ylim(-100, 500) +
   facet_wrap(~year)
 
