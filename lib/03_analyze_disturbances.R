@@ -285,7 +285,8 @@ p_responsecurve <- ggplot(data = prediction) +
         strip.text = element_text(size = 9)) +
   labs(x = "Summer soil moisture anomaly 2018", 
        y = "Disturbance anomaly (%)",
-       col = "Summer\nVPD\nanomaly (kPa)", fill = "Summer\nVPD (kPa)") +
+       col = "Summer VPD\nanomaly (kPa)", 
+       fill = "Summer VPD\nanomaly (kPa)") +
   ylim(-100, 500) +
   facet_wrap(~year)
 
