@@ -246,6 +246,8 @@ modeldat_inp <- modeldat %>%
   filter(disturbance_ha > 0) %>%
   mutate(year = factor(year))
 
+fit0 <- lm(log(anomaly + 1) ~ sm_z_18 * vpd_z_18 * year, 
+           data = modeldat_inp)
 
 fit1 <- lm(log(anomaly + 1) ~ sm_z_18 * vpd_z * year, 
           data = modeldat_inp)
@@ -253,7 +255,7 @@ fit1 <- lm(log(anomaly + 1) ~ sm_z_18 * vpd_z * year,
 fit2 <- lm(log(anomaly + 1) ~ sm_z * vpd_z * year, 
           data = modeldat_inp)
 
-AIC(fit1, fit2)
+AIC(fit0, fit1, fit2)
 
 lmtest::lrtest(fit1, fit2)
 
@@ -265,7 +267,6 @@ broom::tidy(fit1) %>%
 prediction <- effects::effect("sm_z_18:vpd_z:year", 
                               fit1, 
                               xlevels = list(sm_z_18 = seq(-4, 4, length.out = 100),
-                                             sm_z_legacy = c(-2, 0, 2),
                                              vpd_z = c(-1, 0, 1, 2))) %>%
   as.data.frame()
 
@@ -281,6 +282,48 @@ p_responsecurve <- ggplot(data = prediction) +
                   fill = factor(vpd_z)),
               alpha = 0.1) +
   geom_line(aes(x = sm_z_18, y = (exp(fit) - 1) * 100, col = factor(vpd_z))) +
+  theme_classic() +
+  scale_color_brewer(palette = "RdBu", direction = -1) +
+  scale_fill_brewer(palette = "RdBu", direction = -1) +
+  theme(panel.background = element_rect(color = "black", size = 1.2),
+        axis.text = element_text(size = 8, color = "grey30"),
+        axis.title = element_text(size = 9),
+        legend.position = "right",
+        # legend.position = c(1, 1),
+        legend.justification = c(1, 1),
+        legend.background = element_blank(),
+        legend.title = element_text(size = 8),
+        legend.text = element_text(size = 7),
+        legend.key.height = unit(0.25, "cm"),
+        legend.key.width = unit(0.25, "cm"),
+        strip.background = element_blank(),
+        strip.text = element_text(size = 9)) +
+  labs(x = "Summer soil moisture anomaly in 2018", 
+       y = "Disturbance anomaly (%)",
+       col = "Summer vapor\npressure anomaly", 
+       fill = "Summer vapor\npressure anomaly") +
+  ylim(-100, 500) +
+  facet_wrap(~year)
+  #facet_grid(vpd_z~year)
+
+ggsave("results/disturbance_anomaly_response_curve_detailed.pdf", p_responsecurve, width = 7.5, height = 7.5)
+
+prediction <- effects::effect("sm_z_18:vpd_z_18:year", 
+                              fit0, 
+                              xlevels = list(sm_z_18 = seq(-4, 4, length.out = 100),
+                                             vpd_z_18 = c(-1, 0, 1, 2))) %>%
+  as.data.frame()
+
+ggplot(data = prediction) +
+  geom_point(data = modeldat %>%
+               filter(disturbance_ha > 0) %>%
+               sample_frac(., 0.01),
+             aes(x = sm_z_18, y = (anomaly) * 100),
+             alpha = 0.1, shape = 1, fill = NA) +
+  geom_ribbon(aes(x = sm_z_18, ymin = (exp(lower) - 1) * 100, ymax = (exp(upper) - 1) * 100, 
+                  fill = factor(vpd_z_18)),
+              alpha = 0.1) +
+  geom_line(aes(x = sm_z_18, y = (exp(fit) - 1) * 100, col = factor(vpd_z_18))) +
   theme_classic() +
   scale_color_brewer(palette = "RdBu", direction = -1) +
   scale_fill_brewer(palette = "RdBu", direction = -1) +
@@ -304,26 +347,22 @@ p_responsecurve <- ggplot(data = prediction) +
        fill = "Summer vapor\npressure anomaly") +
   ylim(-100, 500) +
   facet_wrap(~year)
-  #facet_grid(vpd_z~year)
-
-ggsave("results/disturbance_anomaly_response_curve.pdf", p_responsecurve, width = 7.5, height = 2.5)
 
 prediction <- effects::effect("sm_z:vpd_z:year", 
-                              fit, 
-                              xlevels = list(sm_z = seq(-4, 4, length.out = 10),
-                                             sm_z_legacy = c(-2, 0, 2),
-                                             vpd_z = c(-2, 0, 2))) %>%
+                              fit2, 
+                              xlevels = list(sm_z = seq(-4, 4, length.out = 100),
+                                             vpd_z = c(-1, 0, 1, 2))) %>%
   as.data.frame()
 
-p_responsecurve <- ggplot(data = prediction) +
+ggplot(data = prediction) +
   geom_point(data = modeldat %>%
                filter(disturbance_ha > 0) %>%
-               sample_n(., 500),
+               sample_frac(., 0.01),
              aes(x = sm_z, y = (anomaly) * 100),
-             alpha = 0.1) +
+             alpha = 0.1, shape = 1, fill = NA) +
   geom_ribbon(aes(x = sm_z, ymin = (exp(lower) - 1) * 100, ymax = (exp(upper) - 1) * 100, 
                   fill = factor(vpd_z)),
-              alpha = 0.3) +
+              alpha = 0.1) +
   geom_line(aes(x = sm_z, y = (exp(fit) - 1) * 100, col = factor(vpd_z))) +
   theme_classic() +
   scale_color_brewer(palette = "RdBu", direction = -1) +
@@ -344,8 +383,8 @@ p_responsecurve <- ggplot(data = prediction) +
         strip.text = element_text(size = 9)) +
   labs(x = "Summer soil moisture anomaly", 
        y = "Disturbance anomaly (%)",
-       col = "Vapor pressure anomaly", 
-       fill = "Vapor pressure anomaly") +
+       col = "Summer vapor\npressure anomaly", 
+       fill = "Summer vapor\npressure anomaly") +
   ylim(-100, 500) +
   facet_wrap(~year)
 
