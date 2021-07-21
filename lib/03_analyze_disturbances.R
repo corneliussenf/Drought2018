@@ -139,7 +139,7 @@ dat_grid_2018_2020 <- dat_grid %>%
 p_anomaly_map <- ggplot() +
   geom_sf(data = world, color = "black", fill = "lightgray") +
   geom_sf(data = dat_grid_2018_2020,
-          aes(fill = anomaly_capped * 100, col = anomaly_capped * 100)) +
+          aes(fill = anomaly_capped * 100), col = NA) +
   geom_sf(data = world, color = "black", fill = NA) +
   scale_fill_gradient2(low = "#2166ac", mid = "#FFFFFF", high = "#b2182b",
                        breaks = c(-100, 0, 100, 200, 300, 400, 500),
@@ -151,20 +151,19 @@ p_anomaly_map <- ggplot() +
   theme(panel.spacing = unit(0, "cm"),
         #panel.background = element_rect(fill = "#d1e5f0", color = "black", size = 1.125),
         panel.background = element_rect(fill = "white", color = "black", size = 1.125),
-        legend.key.height = unit(1.125, "cm"),
+        legend.key.height = unit(1, "cm"),
         legend.key.width = unit(0.125, "cm"),
         legend.position = "right",
         strip.background = element_blank(),
-        strip.text = element_blank(),
+        strip.text = element_text(size = 9, color = "black"),
         plot.title = element_text(size = 10),
         legend.text = element_text(size = 9),
         axis.text = element_blank(),
         axis.title = element_blank(),
-        axis.ticks = element_blank(),
-        plot.margin = unit(c(0, 0, 0, 0), "cm")) +
+        axis.ticks = element_blank()) +
   coord_sf(expand = FALSE, datum = NA) +
   labs(col = NULL, fill = NULL, 
-       title = paste0("Forest disturbance anomaly 2018-2020 in reference to ", paste(range(reference_period), collapse = "-"))) +
+       title = "a) Forest disturbance anomalies") +
   facet_wrap(~year, ncol = 3)
 
 ggsave("results/disturbance_anomaly_cummulative_map_2018-2020.pdf", p_anomaly_map, width = 7.5, height = 3)
@@ -217,9 +216,12 @@ ggsave("results/disturbance_anomaly_1986-2020_regions.pdf", p_anomaly_regions, w
 
 # Model -------------------------------------------------------------------
 
+load(file = "temp/dat.RData")
+climate_2018 <- read_csv("data/climate/era5_sm_vpd_summer_anomaly.csv")
+
 modeldat <- dat %>%
   filter(!is.na(disturbance_ha)) %>% 
-  filter(year %in% 2018:2020) %>%
+  filter(year %in% 2017:2020) %>%
   mutate(disturbance_rate = disturbance_ha / forest_ha,
          disturbance_count = as.integer(disturbance_ha / 0.09),
          forest_count = as.integer(forest_ha / 0.09)) %>%
@@ -227,6 +229,12 @@ modeldat <- dat %>%
   left_join(climate_2018 %>% 
               filter(year %in% 2018) %>% 
               dplyr::select(gridindex, sm_z_18 = sm_z, vpd_z_18 = vpd_z)) %>%
+  left_join(climate_2018 %>% 
+              filter(year %in% 2019) %>% 
+              dplyr::select(gridindex, sm_z_19 = sm_z, vpd_z_19 = vpd_z)) %>%
+  left_join(climate_2018 %>% 
+              filter(year %in% 2020) %>% 
+              dplyr::select(gridindex, sm_z_20 = sm_z, vpd_z_20 = vpd_z)) %>%
   arrange(gridindex) %>%
   filter(!is.na(vpd_z)) %>% 
   filter(!is.na(sm_z))
@@ -238,33 +246,40 @@ modeldat_inp <- modeldat %>%
   filter(disturbance_ha > 0) %>%
   mutate(year = factor(year))
 
-fit_all <- lm(log(anomaly + 1) ~ (sm_z_18 * vpd_z) * year, 
-              data = modeldat_inp)
 
-summary(fit_all)
+fit1 <- lm(log(anomaly + 1) ~ sm_z_18 * vpd_z * year, 
+          data = modeldat_inp)
 
-options(na.action = "na.fail")
+fit2 <- lm(log(anomaly + 1) ~ sm_z * vpd_z * year, 
+          data = modeldat_inp)
 
-modelselect <- MuMIn::dredge(fit_all)
+AIC(fit1, fit2)
 
-summary(fit_all)
+lmtest::lrtest(fit1, fit2)
 
-#plot(fit_all)
+summary(fit1)
+
+broom::tidy(fit1) %>%
+  write_csv(., "results/modelresults.csv")
 
 prediction <- effects::effect("sm_z_18:vpd_z:year", 
-                              fit_all, 
-                              xlevels = list(sm_z_18 = seq(-4, 4, length.out = 250),
-                                             vpd_z = c(-3, 0, 3, 5))) %>%
+                              fit1, 
+                              xlevels = list(sm_z_18 = seq(-4, 4, length.out = 100),
+                                             sm_z_legacy = c(-2, 0, 2),
+                                             vpd_z = c(-1, 0, 1, 2))) %>%
   as.data.frame()
 
 p_responsecurve <- ggplot(data = prediction) +
   geom_point(data = modeldat %>%
                filter(disturbance_ha > 0) %>%
-               sample_n(., 500),
+               sample_frac(., 0.01),
+               #mutate(vpd_z = cut(vpd_z, c(-1.5, -0.5, 0.5, 1.5, 2.5), labels = c(-1, 0, 1, 2))) %>%
+               #filter(!is.na(vpd_z)),
              aes(x = sm_z_18, y = (anomaly) * 100),
-             alpha = 0.1) +
-  geom_ribbon(aes(x = sm_z_18, ymin = (exp(lower) - 1) * 100, ymax = (exp(upper) - 1) * 100, fill = factor(vpd_z)),
-              alpha = 0.3) + 
+             alpha = 0.1, shape = 1, fill = NA) +
+  geom_ribbon(aes(x = sm_z_18, ymin = (exp(lower) - 1) * 100, ymax = (exp(upper) - 1) * 100, 
+                  fill = factor(vpd_z)),
+              alpha = 0.1) +
   geom_line(aes(x = sm_z_18, y = (exp(fit) - 1) * 100, col = factor(vpd_z))) +
   theme_classic() +
   scale_color_brewer(palette = "RdBu", direction = -1) +
@@ -283,14 +298,56 @@ p_responsecurve <- ggplot(data = prediction) +
         legend.key.width = unit(0.25, "cm"),
         strip.background = element_blank(),
         strip.text = element_text(size = 9)) +
-  labs(x = "Summer soil moisture anomaly 2018", 
+  labs(x = "Summer soil moisture anomaly", 
        y = "Disturbance anomaly (%)",
-       col = "Summer VPD\nanomaly (kPa)", 
-       fill = "Summer VPD\nanomaly (kPa)") +
+       col = "Summer vapor\npressure anomaly", 
+       fill = "Summer vapor\npressure anomaly") +
   ylim(-100, 500) +
   facet_wrap(~year)
+  #facet_grid(vpd_z~year)
 
 ggsave("results/disturbance_anomaly_response_curve.pdf", p_responsecurve, width = 7.5, height = 2.5)
+
+prediction <- effects::effect("sm_z:vpd_z:year", 
+                              fit, 
+                              xlevels = list(sm_z = seq(-4, 4, length.out = 10),
+                                             sm_z_legacy = c(-2, 0, 2),
+                                             vpd_z = c(-2, 0, 2))) %>%
+  as.data.frame()
+
+p_responsecurve <- ggplot(data = prediction) +
+  geom_point(data = modeldat %>%
+               filter(disturbance_ha > 0) %>%
+               sample_n(., 500),
+             aes(x = sm_z, y = (anomaly) * 100),
+             alpha = 0.1) +
+  geom_ribbon(aes(x = sm_z, ymin = (exp(lower) - 1) * 100, ymax = (exp(upper) - 1) * 100, 
+                  fill = factor(vpd_z)),
+              alpha = 0.3) +
+  geom_line(aes(x = sm_z, y = (exp(fit) - 1) * 100, col = factor(vpd_z))) +
+  theme_classic() +
+  scale_color_brewer(palette = "RdBu", direction = -1) +
+  scale_fill_brewer(palette = "RdBu", direction = -1) +
+  #facet_wrap(~year) +
+  theme(panel.background = element_rect(color = "black", size = 1.2),
+        axis.text = element_text(size = 8, color = "grey30"),
+        axis.title = element_text(size = 9),
+        legend.position = "right",
+        # legend.position = c(1, 1),
+        legend.justification = c(1, 1),
+        legend.background = element_blank(),
+        legend.title = element_text(size = 8),
+        legend.text = element_text(size = 7),
+        legend.key.height = unit(0.25, "cm"),
+        legend.key.width = unit(0.25, "cm"),
+        strip.background = element_blank(),
+        strip.text = element_text(size = 9)) +
+  labs(x = "Summer soil moisture anomaly", 
+       y = "Disturbance anomaly (%)",
+       col = "Vapor pressure anomaly", 
+       fill = "Vapor pressure anomaly") +
+  ylim(-100, 500) +
+  facet_wrap(~year)
 
 ### For supplement
 
@@ -312,4 +369,92 @@ dat %>%
   separate("2020", c("disturbance_ha_2020", "disturbance_anomaly_percent_2020"), "\\:") %>%
   write_excel_csv("results/disturbance_anomalies_map_estimates.csv")
 
+# Climate data for Figure 1 -----------------------------------------------
 
+climgrid <- read_sf("data/climate/climategrid_epsg3035.gpkg")
+climgrid <- climgrid %>% 
+  right_join(climate_2018)
+
+world <- rnaturalearth::ne_countries(scale = "medium", returnclass = "sf")
+world <- st_transform(world, st_crs(cntrs))
+world <- st_crop(world, st_bbox(cntrs) + c(-0.05, -0.05, 0.01, 0.01) * as.double(st_bbox(cntrs)))
+
+sm_anomaly <- climgrid %>%
+  filter(year %in% 2018:2020) %>%
+  filter(gridindex %in% dat$gridindex) %>%
+  dplyr::select(gridindex, vpd_z, sm_z, year) %>%
+  mutate(sm_z = ifelse(sm_z < -4.5, -4.5, sm_z),
+         sm_z = ifelse(sm_z > 4.5, -4.5, sm_z)) %>%
+  ggplot(.) +
+  geom_sf(data = world, color = "black", fill = "lightgray") +
+  geom_sf(aes(fill = sm_z), col = NA) +
+  geom_sf(data = world, color = "black", fill = NA) +
+  scale_fill_gradient2(low = "#b2182b", mid = "#FFFFFF", high = "#2166ac",
+                       breaks = c(-4.5, -3, -1.5, 0, 1.5, 3, 4.5),
+                       limits = c(-4.5, 4.5),
+                       labels = c("< -4.5", "-3", "-1.5", "0", "1.5", "3", "> 4.5")) +
+  scale_color_gradient2(low = "#b2182b", mid = "#FFFFFF", high = "#2166ac",
+                        breaks = c(-4.5, -3, -1.5, 0, 1.5, 3, 4.5),
+                        limits = c(-4.5, 4.5),
+                        labels = c("< -4.5", "-3", "-1.5", "0", "1.5", "3", "> 4.5")) +
+  theme_linedraw() +
+  theme(panel.spacing = unit(0, "cm"),
+        #panel.background = element_rect(fill = "#d1e5f0", color = "black", size = 1.125),
+        panel.background = element_rect(fill = "white", color = "black", size = 1.125),
+        legend.key.height = unit(1, "cm"),
+        legend.key.width = unit(0.125, "cm"),
+        legend.position = "right",
+        strip.background = element_blank(),
+        strip.text = element_text(size = 9, color = "black"),
+        plot.title = element_text(size = 10),
+        legend.text = element_text(size = 9),
+        axis.text = element_blank(),
+        axis.title = element_blank(),
+        axis.ticks = element_blank()) +
+  coord_sf(expand = FALSE, datum = NA) +
+  labs(col = NULL, fill = NULL,
+       title = "b) Summer soil moisture anomalies") +
+  facet_wrap(~year, ncol = 3)
+
+ggsave("results/sm_anomaly.pdf", sm_anomaly, width = 7.5, height = 3)
+
+ vpd_anomaly <- climgrid %>%
+  filter(year %in% 2018:2020) %>%
+  filter(gridindex %in% dat$gridindex) %>%
+  dplyr::select(gridindex, vpd_z, sm_z, year) %>%
+  mutate(vpd_z = ifelse(vpd_z > 4.5, 4.5, vpd_z)) %>%
+  ggplot(.) +
+  geom_sf(data = world, color = "black", fill = "lightgray") +
+  geom_sf(aes(fill = vpd_z), col = NA) +
+  geom_sf(data = world, color = "black", fill = NA) +
+  scale_fill_gradient2(low = "#2166ac", mid = "#FFFFFF", high = "#b2182b",
+                       breaks = c(-3, -1.5, 0, 1.5, 3, 4.5),
+                       limits = c(-3, 4.5),
+                       labels = c("-3", "-1.5", "0", "1.5", "3", "> 4.5")) +
+  scale_color_gradient2(low = "#2166ac", mid = "#FFFFFF", high = "#b2182b",
+                        breaks = c(-3, -1.5, 0, 1.5, 3, 4.5),
+                        limits = c(-3, 4.5),
+                        labels = c("-3", "-1.5", "0", "1.5", "3", "> 4.5")) +
+  theme_linedraw() +
+  theme(panel.spacing = unit(0, "cm"),
+        panel.background = element_rect(fill = "white", color = "black", size = 1.125),
+        legend.key.height = unit(1, "cm"),
+        legend.key.width = unit(0.125, "cm"),
+        legend.position = "right",
+        strip.background = element_blank(),
+        strip.text = element_text(size = 9, color = "black"),
+        plot.title = element_text(size = 10),
+        legend.text = element_text(size = 9),
+        axis.text = element_blank(),
+        axis.title = element_blank(),
+        axis.ticks = element_blank()) +
+  coord_sf(expand = FALSE, datum = NA) +
+  labs(col = NULL, fill = NULL, 
+       title = "c) Summer vapor pressure deficite anomalies") +
+  facet_wrap(~year, ncol = 3)
+
+ggsave("results/vpd_anomaly.pdf", vpd_anomaly, width = 7.5, height = 3)
+
+p <- p_anomaly_map + sm_anomaly + vpd_anomaly + plot_layout(ncol = 1)
+
+ggsave("results/figure01.pdf", p, width = 7.5, height = 8)
