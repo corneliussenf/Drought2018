@@ -181,11 +181,11 @@ sum_temp_regions <- dat %>%
          euro_region_label = abbreviate(euro_region, 1))
 
 p_anomaly_regions <- ggplot() +
-  geom_boxplot(data = sum_temp_regions,
-              aes(x = reorder(euro_region_label, anomaly, mean),
-                  y = anomaly * 100,
-                  col = euro_region_label),
-              alpha = 0.5, outlier.colour = NA, width = 0.2) +
+  # geom_violin(data = sum_temp_regions,
+  #             aes(x = reorder(euro_region_label, anomaly, mean),
+  #                 y = anomaly * 100,
+  #                 col = euro_region_label),
+  #             alpha = 0.5, width = 0.2) +
   geom_jitter(data = sum_temp_regions,
               aes(x = reorder(euro_region_label, anomaly, mean), 
                   y = anomaly * 100, 
@@ -193,7 +193,7 @@ p_anomaly_regions <- ggplot() +
                   fill = euro_region_label,
                   alpha = ifelse(year <= 2017, "a", "b"),
                   shape = ifelse(year <= 2017, "a", "b")),
-              width = 0.125, stroke = 0, size = 2) +
+              width = 0.15, stroke = 0, size = 2) +
   ggrepel::geom_text_repel(data = sum_temp_regions %>% filter(year > 2017),
                            aes(x = reorder(euro_region_label, anomaly, mean), 
                                y = anomaly * 100, 
@@ -210,7 +210,7 @@ p_anomaly_regions <- ggplot() +
   scale_fill_brewer(palette = "Paired") +
   coord_flip() +
   scale_shape_manual(values = c(22, 21)) +
-  scale_alpha_manual(values = c(0.1, 1))
+  scale_alpha_manual(values = c(0.2, 1))
 
 ggsave("results/disturbance_anomaly_1986-2020_regions.pdf", p_anomaly_regions, width = 3.5, height = 3.5)
 
@@ -266,7 +266,7 @@ broom::tidy(fit1) %>%
 
 prediction <- effects::effect("sm_z_18:vpd_z:year", 
                               fit1, 
-                              xlevels = list(sm_z_18 = seq(-4, 4, length.out = 100),
+                              xlevels = list(sm_z_18 = seq(-5, 5, length.out = 100),
                                              vpd_z = c(-1, 0, 1, 2))) %>%
   as.data.frame()
 
@@ -280,7 +280,7 @@ p_responsecurve <- ggplot(data = prediction) +
              alpha = 0.1, shape = 1, fill = NA) +
   geom_ribbon(aes(x = sm_z_18, ymin = (exp(lower) - 1) * 100, ymax = (exp(upper) - 1) * 100, 
                   fill = factor(vpd_z)),
-              alpha = 0.1) +
+              alpha = 0.3) +
   geom_line(aes(x = sm_z_18, y = (exp(fit) - 1) * 100, col = factor(vpd_z))) +
   theme_classic() +
   scale_color_brewer(palette = "RdBu", direction = -1) +
@@ -300,13 +300,13 @@ p_responsecurve <- ggplot(data = prediction) +
         strip.text = element_text(size = 9)) +
   labs(x = "Summer soil moisture anomaly in 2018", 
        y = "Disturbance anomaly (%)",
-       col = "Summer vapor\npressure anomaly", 
-       fill = "Summer vapor\npressure anomaly") +
+       col = "Summer vapor\npressure deficit\nanomaly", 
+       fill = "Summer vapor\npressure deficit\nanomaly") +
   ylim(-100, 500) +
   facet_wrap(~year)
   #facet_grid(vpd_z~year)
 
-ggsave("results/disturbance_anomaly_response_curve_detailed.pdf", p_responsecurve, width = 7.5, height = 7.5)
+ggsave("results/disturbance_anomaly_response_curve.pdf", p_responsecurve, width = 7.5, height = 2.5)
 
 prediction <- effects::effect("sm_z_18:vpd_z_18:year", 
                               fit0, 
